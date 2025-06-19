@@ -14,7 +14,7 @@ import { User } from './users/user.entity';
 import { Event } from './events/event.entity';
 import { EventAcknowledgment } from './events/event-ack.entity';
 import { Friendship } from './friends/friendship.entity';
-import { LeaderboardPoint } from './leaderboard/leaderboard.entity';
+import { LeaderboardPoint } from './leaderboard/leaderboard-point.entity';
 
 @Module({
   imports: [

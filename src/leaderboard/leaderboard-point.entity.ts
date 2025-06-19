@@ -1,17 +1,30 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, Unique } from 'typeorm';
 import { User } from '../users/user.entity';
+import { Event } from '../events/event.entity';
 
 @Entity('leaderboard_points')
-@Unique(['friend', 'creator'])
+@Unique(['friend', 'creator', 'event'])
 export class LeaderboardPoint {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @Column({ name: 'friend_id', type: 'int' })
+  friendId: number;
+
+  @Column({ name: 'creator_id', type: 'int' })
+  creatorId: number;
+
+  @Column({ name: 'event_id', type: 'int', nullable: true })
+  eventId: number | null;
+
+  @ManyToOne(() => User, user => user.leaderboardAsFriend, { onDelete: 'CASCADE' })
   friend: User;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, user => user.leaderboardCreated, { onDelete: 'CASCADE' })
   creator: User;
+
+  @ManyToOne(() => Event, { onDelete: 'CASCADE' })
+  event: Event;
 
   @Column()
   points: number;

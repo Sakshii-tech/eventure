@@ -1,0 +1,105 @@
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+} from '@nestjs/websockets';
+import { Server, Socket } from 'socket.io';
+import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+
+interface EventCreatedPayload {
+  eventId: number;
+  title: string;
+  creatorId: number;
+  timestamp: Date;
+}
+
+interface LeaderboardEntry {
+  friendId: number;
+  points: number;
+}
+
+interface LeaderboardUpdatedPayload {
+  eventId: number;
+  leaderboard: LeaderboardEntry[];
+}
+
+@WebSocketGateway({
+  cors: { 
+    origin: '*',
+    credentials: true
+  },
+  namespace: '/events',
+})
+export class SocketsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  @WebSocketServer()
+  server: Server;
+
+  private logger = new Logger('SocketsGateway');
+
+  constructor(private jwtService: JwtService) {}
+
+  async handleConnection(client: Socket) {
+    try {
+      const token = client.handshake.auth.token;
+      if (!token) {
+        this.logger.error('No token provided');
+        client.disconnect();
+        return;
+      }
+
+      const payload = this.jwtService.verify(token);
+      const userId = payload.sub;
+
+      // Store userId in socket data for reference
+      client.data.userId = userId;
+
+      // Join user's own room
+      const userRoom = `user_${userId}`;
+      await client.join(userRoom);
+      
+      // Join friend notification room
+      const friendRoom = `user_${userId}_friends`;
+      await client.join(friendRoom);
+
+      this.logger.log(`Client ${client.id} (User ${userId}) connected`);
+      this.logger.log(`Joined rooms: ${userRoom}, ${friendRoom}`);
+      
+      client.emit('connection_success', { 
+        message: 'Successfully connected to events socket',
+        userId: userId,
+        rooms: [userRoom, friendRoom]
+      });
+    } catch (error) {
+      this.logger.error('Connection error:', error);
+      client.disconnect();
+    }
+  }
+
+  handleDisconnect(client: Socket) {
+    this.logger.log(`Client disconnected: ${client.id}`);
+  }
+
+  async notifyEventCreated(creatorId: number, payload: EventCreatedPayload) {
+    const room = `user_${creatorId}_friends`;
+    this.logger.log(`Emitting event_created to room: ${room}`);
+    this.logger.log(`Event payload:`, payload);
+    
+    const sockets = await this.server.in(room).allSockets();
+    this.logger.log(`Connected sockets in room ${room}: ${sockets.size}`);
+    
+    this.server.to(room).emit('event_created', payload);
+  }
+
+  async notifyLeaderboardUpdated(creatorId: number, data: LeaderboardUpdatedPayload) {
+    const room = `user_${creatorId}`;
+    this.logger.log(`Emitting leaderboard_updated to room: ${room}`);
+    this.logger.log(`Leaderboard payload:`, data);
+    
+    const sockets = await this.server.in(room).allSockets();
+    this.logger.log(`Connected sockets in room ${room}: ${sockets.size}`);
+    
+    this.server.to(room).emit('leaderboard_updated', data);
+  }
+}

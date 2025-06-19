@@ -1,3 +1,4 @@
+// src/sockets/sockets.gateway.ts
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -7,6 +8,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { FriendsService } from '../friends/friends.service';
 
 interface EventCreatedPayload {
   eventId: number;
@@ -26,9 +28,9 @@ interface LeaderboardUpdatedPayload {
 }
 
 @WebSocketGateway({
-  cors: { 
+  cors: {
     origin: '*',
-    credentials: true
+    credentials: true,
   },
   namespace: '/events',
 })
@@ -39,12 +41,13 @@ export class SocketsGateway implements OnGatewayConnection, OnGatewayDisconnect 
   private logger = new Logger('SocketsGateway');
   private connectedClients = new Map<string, number>(); // socketId -> userId
 
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private jwtService: JwtService,
+    private friendsService: FriendsService, // Needed to get friend list
+  ) {}
 
   async handleConnection(client: Socket) {
     try {
-      this.logger.debug(`New connection attempt - Socket ID: ${client.id}`);
-      
       const token = client.handshake.auth.token;
       if (!token) {
         this.logger.error(`No token provided for socket ${client.id}`);
@@ -52,95 +55,53 @@ export class SocketsGateway implements OnGatewayConnection, OnGatewayDisconnect 
         return;
       }
 
-      try {
-        const payload = this.jwtService.verify(token);
-        const userId = payload.sub;
-        this.logger.debug(`Token verified for user ${userId} (Socket: ${client.id})`);
+      const payload = this.jwtService.verify(token);
+      const userId = payload.sub;
+      client.data.userId = userId;
+      this.connectedClients.set(client.id, userId);
 
-        // Store userId in socket data and tracking map
-        client.data.userId = userId;
-        this.connectedClients.set(client.id, userId);
+      const room = `user_${userId}`;
+      await client.join(room);
 
-        // Join user's own room
-        const userRoom = `user_${userId}`;
-        await client.join(userRoom);
-        
-        // Join friend notification room
-        const friendRoom = `user_${userId}_friends`;
-        await client.join(friendRoom);
+      this.logger.debug(`User ${userId} connected with socket ${client.id}, joined room ${room}`);
 
-        // Log room membership
-        const rooms = Array.from(client.rooms);
-        this.logger.debug(`Socket ${client.id} (User ${userId}) joined rooms: ${rooms.join(', ')}`);
-        
-        // Log all connected clients
-        this.logger.debug(`Connected clients: ${Array.from(this.connectedClients.entries()).map(([sid, uid]) => `${sid}:${uid}`).join(', ')}`);
-        
-        client.emit('connection_success', { 
-          message: 'Successfully connected to events socket',
-          userId: userId,
-          rooms: rooms,
-          socketId: client.id
-        });
-      } catch (jwtError) {
-        this.logger.error(`JWT verification failed for socket ${client.id}: ${jwtError.message}`);
-        client.disconnect();
-        return;
-      }
+      client.emit('connection_success', {
+        message: 'Successfully connected to socket',
+        userId,
+        socketId: client.id,
+      });
     } catch (error) {
-      this.logger.error(`Connection error for socket ${client.id}:`, error);
+      this.logger.error(`Socket connection failed: ${error.message}`);
       client.disconnect();
     }
   }
 
   handleDisconnect(client: Socket) {
     const userId = this.connectedClients.get(client.id);
-    this.logger.debug(`Client disconnected - Socket ID: ${client.id}, User ID: ${userId}`);
+    this.logger.debug(`User ${userId} disconnected (Socket: ${client.id})`);
     this.connectedClients.delete(client.id);
-    this.logger.debug(`Remaining connected clients: ${Array.from(this.connectedClients.entries()).map(([sid, uid]) => `${sid}:${uid}`).join(', ')}`);
   }
 
   async notifyEventCreated(creatorId: number, payload: EventCreatedPayload) {
-    const room = `user_${creatorId}_friends`;
-    this.logger.debug(`Attempting to emit event_created to room: ${room}`);
-    this.logger.debug(`Event payload: ${JSON.stringify(payload)}`);
-    
-    // Get all sockets in the room
-    const sockets = await this.server.in(room).allSockets();
-    this.logger.debug(`Found ${sockets.size} socket(s) in room ${room}`);
-    
-    if (sockets.size === 0) {
-      this.logger.warn(`No sockets found in room ${room}. Event notification might not be delivered.`);
-      // Log all rooms for debugging
-      const allRooms = await this.getAllRooms();
-      this.logger.debug(`All active rooms: ${allRooms.join(', ')}`);
+    const friends = await this.friendsService.listFriends(creatorId);
+    const friendIds = friends.map(friend => friend.id);
+
+    for (const friendId of friendIds) {
+      const room = `user_${friendId}`;
+      const sockets = await this.server.in(room).allSockets();
+      this.logger.debug(`Emitting event_created to user ${friendId} in room ${room} (Sockets: ${sockets.size})`);
+
+      this.server.to(room).emit('event_created', payload);
     }
 
-    this.server.to(room).emit('event_created', payload);
-    this.logger.debug(`Event notification emitted to room ${room}`);
+    this.logger.log(`Event notification sent to ${friendIds.length} friends of creator ${creatorId}`);
   }
 
   async notifyLeaderboardUpdated(creatorId: number, data: LeaderboardUpdatedPayload) {
     const room = `user_${creatorId}`;
-    this.logger.debug(`Attempting to emit leaderboard_updated to room: ${room}`);
-    this.logger.debug(`Leaderboard payload: ${JSON.stringify(data)}`);
-    
     const sockets = await this.server.in(room).allSockets();
-    this.logger.debug(`Found ${sockets.size} socket(s) in room ${room}`);
-    
-    this.server.to(room).emit('leaderboard_updated', data);
-    this.logger.debug(`Leaderboard update emitted to room ${room}`);
-  }
+    this.logger.debug(`Sending leaderboard_updated to ${sockets.size} socket(s) in room ${room}`);
 
-  private async getAllRooms(): Promise<string[]> {
-    const sids = await this.server.allSockets();
-    const rooms = new Set<string>();
-    for (const sid of sids) {
-      const socket = this.server.sockets.sockets.get(sid);
-      if (socket) {
-        socket.rooms.forEach(room => rooms.add(room));
-      }
-    }
-    return Array.from(rooms);
+    this.server.to(room).emit('leaderboard_updated', data);
   }
 }

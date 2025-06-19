@@ -117,17 +117,23 @@ export class EventsService {
     const orderPosition = event.acknowledgments.length + 1;
     const points = Math.max(100 - ((orderPosition - 1) * 10), 10); // Minimum 10 points
 
+    // Get the full user entity
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
     // Create acknowledgment
     const acknowledgment = new EventAcknowledgment();
     acknowledgment.event = event;
-    acknowledgment.user = { id: userId } as User;
+    acknowledgment.user = user;
     acknowledgment.orderPosition = orderPosition;
     acknowledgment.pointsEarned = points;
 
     await this.ackRepo.save(acknowledgment);
 
     // Update leaderboard
-    await this.leaderboardService.addPoints(event.creator.id, userId, points);
+    await this.leaderboardService.addPoints(event.creator.id, userId, event.id, points);
 
     // Get updated leaderboard for the event
     const eventLeaderboard = await this.getEventLeaderboard(eventId);

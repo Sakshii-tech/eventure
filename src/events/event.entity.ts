@@ -31,7 +31,5 @@ export class Event {
   createdAt: Date;
 
   @OneToMany(() => EventAcknowledgment, ack => ack.event)
- acknowledgments: EventAcknowledgment[];
-
-
+  acknowledgments: EventAcknowledgment[];
 }
