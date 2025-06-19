@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Eventure WebSocket Test</title>
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script>
+        const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjQsImVtYWlsIjoidGVzdDNAZXhhbXBsZS5jb20iLCJpYXQiOjE3NTAzMTI3MjAsImV4cCI6MTc1MDkxNzUyMH0.1p7Epccnq3T-tPeInjz60dk9HJ-0lLxVCY59MkiB-fg';
+        
+        // Connect to the Socket.IO server
+        const socket = io('http://localhost:3000/events', {
+            extraHeaders: {
+                Authorization: `Bearer ${token}`
+            }
+        });
+
+        // Listen for connection success
+        socket.on('connection_success', (data) => {
+            console.log('Connection success:', data);
+            document.getElementById('status').textContent = 'Connected!';
+            
+            // Join the friends room
+            socket.emit('join_friend_room', 4); // Using our user ID
+        });
+
+        // Listen for room joined confirmation
+        socket.on('room_joined', (data) => {
+            console.log('Joined room:', data);
+            document.getElementById('status').textContent += '\nJoined room: ' + data.room;
+        });
+
+        // Listen for event created notifications
+        socket.on('event_created', (data) => {
+            console.log('New event:', data);
+            document.getElementById('events').innerHTML += `<p>New event: ${JSON.stringify(data)}</p>`;
+        });
+    </script>
+</head>
+<body>
+    <h1>Eventure WebSocket Test</h1>
+    <pre id="status">Connecting...</pre>
+    <div id="events"></div>
+</body>
+</html>

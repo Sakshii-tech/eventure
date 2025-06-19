@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Eventure WebSocket Test</title>
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+    <style>
+        #notifications {
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            min-height: 200px;
+        }
+        .event-notification {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Eventure WebSocket Test</h1>
+    <div>
+        <h3>Connection Status: <span id="status">Disconnected</span></h3>
+        <input type="text" id="userId" placeholder="Enter your user ID">
+        <button onclick="connect()">Connect</button>
+    </div>
+    <div>
+        <h3>Event Notifications:</h3>
+        <div id="notifications"></div>
+    </div>
+
+    <script>
+        let socket;
+
+        function connect() {
+            const userId = document.getElementById('userId').value;
+            if (!userId) {
+                alert('Please enter a user ID');
+                return;
+            }
+
+            socket = io('http://localhost:3000', {
+                query: { userId }
+            });
+
+            socket.on('connect', () => {
+                document.getElementById('status').textContent = 'Connected';
+                socket.emit('join', { userId });
+            });
+
+            socket.on('event_created', (data) => {
+                const notifDiv = document.createElement('div');
+                notifDiv.className = 'event-notification';
+                notifDiv.innerHTML = `
+                    <strong>New Event Created!</strong><br>
+                    Title: ${data.title}<br>
+                    Created by: User ${data.creatorId}<br>
+                    Time: ${new Date(data.timestamp).toLocaleString()}
+                `;
+                document.getElementById('notifications').prepend(notifDiv);
+            });
+
+            socket.on('disconnect', () => {
+                document.getElementById('status').textContent = 'Disconnected';
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+// src/events/events.controller.ts
+import {
+  Controller,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+  UseGuards,
+  Body,
+  Req,
+  BadRequestException,
+  Param,
+  Logger,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { EventsService } from './events.service';
+import { CreateEventDto } from './dto/create-event.dto';
+import { extname } from 'path';
+import { Request } from 'express';
+
+interface RequestWithUser extends Request {
+  user: { sub: number; email: string };
+}
+
+@Controller('events')
+@UseGuards(JwtAuthGuard)
+export class EventsController {
+  private readonly logger = new Logger(EventsController.name);
+
+  constructor(private readonly eventsService: EventsService) {}
+
+  @Post()
+  @UseInterceptors(
+    FileInterceptor('media', {
+      storage: diskStorage({
+        destination: './uploads',
+        filename: (req, file, cb) => {
+          const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+          const filename = unique + extname(file.originalname);
+          Logger.log(`Generating filename for upload: ${filename}`, 'EventsController');
+          cb(null, filename);
+        },
+      }),
+      fileFilter: (req, file, cb) => {
+        const allowedTypes = ['image/jpeg', 'image/png', 'video/mp4'];
+        if (!allowedTypes.includes(file.mimetype)) {
+          Logger.error(`Invalid file type: ${file.mimetype}`, 'EventsController');
+          return cb(
+            new BadRequestException('Only jpg, png, and mp4 files are allowed'),
+            false,
+          );
+        }
+        Logger.log(`Accepted file type: ${file.mimetype}`, 'EventsController');
+        cb(null, true);
+      },
+    }),
+  )
+  async create(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: CreateEventDto,
+    @Req() req: RequestWithUser,
+  ) {
+    this.logger.log(`Creating event for user ${req.user.sub} with title: ${dto.title}`);
+    
+    if (!file) {
+      this.logger.error('No media file provided');
+      throw new BadRequestException('Media file is required');
+    }
+
+    try {
+      const result = await this.eventsService.createEvent(
+        req.user.sub,
+        dto,
+        file.filename,
+      );
+      this.logger.log(`Event created successfully: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      this.logger.error(`Error creating event: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  @Post(':id/open')
+  async acknowledgeEvent(@Param('id') id: string, @Req() req: RequestWithUser) {
+    this.logger.log(`User ${req.user.sub} acknowledging event ${id}`);
+    try {
+      const result = await this.eventsService.acknowledgeEvent(
+        parseInt(id, 10),
+        req.user.sub,
+      );
+      this.logger.log(`Event acknowledged successfully: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      this.logger.error(`Error acknowledging event: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+}

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Eventure Test</title>
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+    <style>
+        .container { margin: 20px; }
+        .log { 
+            background: #f0f0f0; 
+            padding: 10px; 
+            height: 300px; 
+            overflow-y: auto;
+            font-family: monospace;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>User Info</h2>
+        <input type="text" id="token" placeholder="JWT Token" style="width: 500px"/>
+        <button onclick="connectSocket()">Connect Socket</button>
+        <div id="connectionStatus"></div>
+    </div>
+    
+    <div class="container">
+        <h2>Create Event</h2>
+        <input type="text" id="title" placeholder="Event Title"/>
+        <input type="file" id="media" accept="image/jpeg,image/png,video/mp4"/>
+        <button onclick="createEvent()">Create Event</button>
+    </div>
+    
+    <div class="container">
+        <h2>Acknowledge Event</h2>
+        <input type="text" id="eventId" placeholder="Event ID"/>
+        <button onclick="acknowledgeEvent()">Acknowledge Event</button>
+    </div>
+    
+    <div class="container">
+        <h2>Events Log</h2>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let socket;
+        let currentToken;
+        let userId;
+
+        function updateConnectionStatus(status, success = true) {
+            const el = document.getElementById('connectionStatus');
+            el.textContent = status;
+            el.className = success ? 'success' : 'error';
+        }
+
+        function log(message, type = 'info') {
+            const logElement = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = type;
+            entry.textContent = `${new Date().toISOString()}: ${message}`;
+            logElement.insertBefore(entry, logElement.firstChild);
+        }
+
+        function connectSocket() {
+            if (socket) {
+                socket.disconnect();
+            }
+
+            currentToken = document.getElementById('token').value;
+            if (!currentToken) {
+                updateConnectionStatus('Please enter a token first', false);
+                return;
+            }
+
+            try {
+                // Parse the token to get the user ID
+                const payload = JSON.parse(atob(currentToken.split('.')[1]));
+                userId = payload.sub;
+                log(`Extracted user ID: ${userId}`);
+            } catch (error) {
+                log(`Error parsing token: ${error.message}`, 'error');
+                return;
+            }
+
+            socket = io('http://localhost:3000/events', {
+                auth: { token: currentToken }
+            });
+
+            socket.on('connect', () => {
+                log('Socket connected');
+                updateConnectionStatus('Connected');
+            });
+
+            socket.on('connect_error', (error) => {
+                log(`Connection error: ${error.message}`, 'error');
+                updateConnectionStatus(`Connection failed: ${error.message}`, false);
+            });
+
+            socket.on('disconnect', (reason) => {
+                log(`Socket disconnected: ${reason}`);
+                updateConnectionStatus('Disconnected', false);
+            });
+
+            socket.on('connection_success', (data) => {
+                log(`Server confirmed connection: ${JSON.stringify(data)}`);
+            });
+
+            socket.on('event_created', (data) => {
+                log(`Event notification received: ${JSON.stringify(data)}`, 'success');
+                // Auto-fill the event ID for acknowledgment
+                document.getElementById('eventId').value = data.eventId;
+            });
+
+            socket.on('leaderboard_updated', (data) => {
+                log(`Leaderboard updated: ${JSON.stringify(data)}`);
+            });
+        }
+
+        async function createEvent() {
+            const title = document.getElementById('title').value;
+            const mediaFile = document.getElementById('media').files[0];
+
+            if (!title || !mediaFile) {
+                log('Please enter a title and select a media file', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('title', title);
+            formData.append('media', mediaFile);
+
+            try {
+                const response = await fetch('http://localhost:3000/events', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`
+                    },
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    log(`Event created successfully: ${JSON.stringify(data)}`, 'success');
+                } else {
+                    log(`Error creating event: ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (error) {
+                log(`Error creating event: ${error.message}`, 'error');
+            }
+        }
+
+        async function acknowledgeEvent() {
+            const eventId = document.getElementById('eventId').value;
+            if (!eventId) {
+                log('Please enter an event ID', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`http://localhost:3000/events/${eventId}/open`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`
+                    }
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    log(`Event acknowledged successfully: ${JSON.stringify(data)}`, 'success');
+                } else {
+                    log(`Error acknowledging event: ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (error) {
+                log(`Error acknowledging event: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

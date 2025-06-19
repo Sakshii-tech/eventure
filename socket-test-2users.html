@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Eventure WebSocket Test - 2 Users</title>
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+    <style>
+        .container { 
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .notification {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .log { font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>User 1 (Alice)</h2>
+        <div>
+            <input type="text" id="title1" placeholder="Event Title"/>
+            <input type="file" id="media1" accept="image/jpeg,image/png,video/mp4"/>
+            <button onclick="createEvent(1)">Create Event</button>
+        </div>
+        <pre id="user1-status" class="log">Waiting to connect...</pre>
+        <div id="user1-connection-info"></div>
+    </div>
+
+    <div class="container">
+        <h2>User 2 (Bob)</h2>
+        <div>
+            <input type="text" id="eventId2" placeholder="Event ID"/>
+            <button onclick="acknowledgeEvent(2)">Acknowledge Event</button>
+        </div>
+        <pre id="user2-status" class="log">Waiting to connect...</pre>
+        <div id="user2-connection-info"></div>
+    </div>
+
+    <script>
+        // Alice's token (User 1)
+        const token1 = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjQsImVtYWlsIjoidGVzdDNAZXhhbXBsZS5jb20iLCJpYXQiOjE3NTAzMTI3MjAsImV4cCI6MTc1MDkxNzUyMH0.1p7Epccnq3T-tPeInjz60dk9HJ-0lLxVCY59MkiB-fg';
+        
+        // Bob's token (User 2)
+        const token2 = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjUsImVtYWlsIjoiZnJpZW5kQGV4YW1wbGUuY29tIiwiaWF0IjoxNzUwMzEzMzAzLCJleHAiOjE3NTA5MTgxMDN9.zptepfiShQ4xCiAIEDHO8pbTVUcT4ELhTqkmRmYpkVg';
+
+        let socket1, socket2;
+        let socketInfo1 = {}, socketInfo2 = {};
+
+        function parseJwt(token) {
+            try {
+                const base64Url = token.split('.')[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                return JSON.parse(window.atob(base64));
+            } catch (e) {
+                console.error('Error parsing JWT:', e);
+                return null;
+            }
+        }
+
+        function log(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            const timestamp = new Date().toISOString();
+            const logMessage = `\n[${timestamp}] [${type.toUpperCase()}] ${message}`;
+            element.innerHTML += logMessage;
+            element.scrollTop = element.scrollHeight;
+
+            // Also log to console for easier debugging
+            console.log(`${elementId}: ${message}`);
+        }
+
+        function updateConnectionInfo(userId, info) {
+            const infoObj = userId === 1 ? socketInfo1 : socketInfo2;
+            Object.assign(infoObj, info);
+            
+            const status = document.getElementById(`user${userId}-connection-info`);
+            status.innerHTML = `
+                <strong>Connection Info:</strong><br>
+                Socket ID: ${infoObj.socketId || 'N/A'}<br>
+                User ID: ${infoObj.userId || 'N/A'}<br>
+                Rooms: ${(infoObj.rooms || []).join(', ')}<br>
+            `;
+        }
+
+        function createUserSocket(token, userId) {
+            const tokenData = parseJwt(token);
+            log(`user${userId}-status`, `Initializing socket for user ${tokenData.sub} (${tokenData.email})`);
+
+            const socket = io('http://localhost:3000/events', {
+                auth: { token },
+                transports: ['websocket']
+            });
+
+            socket.on('connect', () => {
+                log(`user${userId}-status`, `Socket connected. ID: ${socket.id}`, 'success');
+                updateConnectionInfo(userId, { socketId: socket.id });
+            });
+
+            socket.on('connect_error', (error) => {
+                log(`user${userId}-status`, `Connection error: ${error.message}`, 'error');
+                updateConnectionInfo(userId, { error: error.message });
+            });
+
+            socket.on('connection_success', (data) => {
+                log(`user${userId}-status`, `Connection confirmed: ${JSON.stringify(data)}`, 'success');
+                updateConnectionInfo(userId, {
+                    userId: data.userId,
+                    rooms: data.rooms,
+                    socketId: data.socketId
+                });
+            });
+
+            socket.on('event_created', (data) => {
+                log(`user${userId}-status`, `New event notification: ${JSON.stringify(data)}`, 'success');
+                if (userId === 2) { // Bob automatically gets the event ID
+                    document.getElementById('eventId2').value = data.eventId;
+                }
+            });
+
+            socket.on('leaderboard_updated', (data) => {
+                log(`user${userId}-status`, `Leaderboard update: ${JSON.stringify(data)}`, 'success');
+            });
+
+            socket.on('disconnect', (reason) => {
+                log(`user${userId}-status`, `Socket disconnected: ${reason}`, 'warning');
+            });
+
+            socket.on('error', (error) => {
+                log(`user${userId}-status`, `Socket error: ${error}`, 'error');
+            });
+
+            return socket;
+        }
+
+        // Connect both users
+        socket1 = createUserSocket(token1, 1); // Alice
+        socket2 = createUserSocket(token2, 2); // Bob
+
+        async function createEvent(userId) {
+            const title = document.getElementById(`title${userId}`).value;
+            const mediaFile = document.getElementById(`media${userId}`).files[0];
+            const token = userId === 1 ? token1 : token2;
+
+            if (!title || !mediaFile) {
+                log(`user${userId}-status`, 'Please provide both title and media file', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('title', title);
+            formData.append('media', mediaFile);
+
+            try {
+                log(`user${userId}-status`, `Creating event: ${title}`);
+                const response = await fetch('http://localhost:3000/events', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    log(`user${userId}-status`, `Event created: ${JSON.stringify(data)}`, 'success');
+                } else {
+                    log(`user${userId}-status`, `Error: ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (error) {
+                log(`user${userId}-status`, `Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function acknowledgeEvent(userId) {
+            const eventId = document.getElementById(`eventId${userId}`).value;
+            const token = userId === 1 ? token1 : token2;
+
+            if (!eventId) {
+                log(`user${userId}-status`, 'Please provide an event ID', 'error');
+                return;
+            }
+
+            try {
+                log(`user${userId}-status`, `Acknowledging event: ${eventId}`);
+                const response = await fetch(`http://localhost:3000/events/${eventId}/open`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    log(`user${userId}-status`, `Event acknowledged: ${JSON.stringify(data)}`, 'success');
+                } else {
+                    log(`user${userId}-status`, `Error: ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (error) {
+                log(`user${userId}-status`, `Error: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

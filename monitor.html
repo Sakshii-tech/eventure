@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Event Monitor</title>
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+    <style>
+        body { margin: 20px; font-family: Arial, sans-serif; }
+        .log { 
+            background: #f8f8f8; 
+            padding: 10px; 
+            height: 400px; 
+            overflow-y: auto;
+            font-family: monospace;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h2>Event Monitor</h2>
+    <div>
+        <input type="text" id="token" placeholder="Enter JWT Token" style="width: 500px"/>
+        <button onclick="connect()">Connect</button>
+    </div>
+    <div>
+        <h3>Connection Status: <span id="status">Disconnected</span></h3>
+        <h3>Events Log:</h3>
+        <pre id="log" class="log"></pre>
+    </div>
+
+    <script>
+        let socket;
+
+        function log(message, type = 'info') {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toISOString();
+            const entry = `[${timestamp}] [${type.toUpperCase()}] ${message}\n`;
+            logElement.innerHTML = entry + logElement.innerHTML;
+        }
+
+        function updateStatus(status, isConnected = true) {
+            document.getElementById('status').textContent = status;
+            document.getElementById('status').style.color = isConnected ? 'green' : 'red';
+        }
+
+        function connect() {
+            if (socket) {
+                socket.disconnect();
+            }
+
+            const token = document.getElementById('token').value;
+            if (!token) {
+                log('Please enter a JWT token', 'error');
+                return;
+            }
+
+            try {
+                socket = io('http://localhost:3000/events', {
+                    auth: { token },
+                    transports: ['websocket']
+                });
+
+                socket.on('connect', () => {
+                    log('Connected to server', 'success');
+                    updateStatus('Connected');
+                });
+
+                socket.on('connection_success', (data) => {
+                    log(`Connection details: ${JSON.stringify(data, null, 2)}`, 'success');
+                });
+
+                socket.on('event_created', (data) => {
+                    log(`New event notification: ${JSON.stringify(data, null, 2)}`, 'success');
+                });
+
+                socket.on('leaderboard_updated', (data) => {
+                    log(`Leaderboard update: ${JSON.stringify(data, null, 2)}`, 'info');
+                });
+
+                socket.on('connect_error', (error) => {
+                    log(`Connection error: ${error.message}`, 'error');
+                    updateStatus('Connection Error', false);
+                });
+
+                socket.on('disconnect', (reason) => {
+                    log(`Disconnected: ${reason}`, 'info');
+                    updateStatus('Disconnected', false);
+                });
+
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                updateStatus('Error', false);
+            }
+        }
+    </script>
+</body>
+</html>
