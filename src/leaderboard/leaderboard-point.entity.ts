@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, Unique } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, Unique, JoinColumn } from 'typeorm';
 import { User } from '../users/user.entity';
 import { Event } from '../events/event.entity';
 
@@ -18,9 +18,11 @@ export class LeaderboardPoint {
   eventId: number | null;
 
   @ManyToOne(() => User, user => user.leaderboardAsFriend, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'friend_id' })
   friend: User;
 
   @ManyToOne(() => User, user => user.leaderboardCreated, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'creator_id' })
   creator: User;
 
   @ManyToOne(() => Event, { onDelete: 'CASCADE' })
